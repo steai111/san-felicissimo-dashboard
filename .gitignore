@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+
+# Local database and data
+data/database/
+data/raw_csv/
+data/raw_tableau/
+data/raw_tableau_units/
+data/raw_ga4/
+data/processed/
+data/logs/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+app/beddy_credentials.py
