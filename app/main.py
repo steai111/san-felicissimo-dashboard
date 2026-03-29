@@ -6,6 +6,8 @@ from app.config import DB_PATH
 
 from app.database import init_db
 
+from fastapi.responses import HTMLResponse, JSONResponse
+
 app = FastAPI(title="Data Dashboard")
 
 @app.on_event("startup")
@@ -408,6 +410,62 @@ def get_website_sessions_count(selected_month: str, selected_year: str, selected
         return 0
 
     return row["metric_value"] or 0
+
+@app.get("/api/dashboard", response_class=JSONResponse)
+def dashboard_api(
+    year: str = "2025",
+    month: str = "2025-04",
+    mode: str = "month",
+) -> dict:
+    channel_metrics = get_channel_metrics(month, year, mode)
+    average_stay_total = get_average_stay_total(month, year, mode)
+    nationality_metrics = get_nationality_presence_metrics(month, year, mode)
+    children_bookings_count = get_bookings_with_children_count(month, year, mode)
+    unit_nights_summary = get_unit_nights_summary(month, year, mode)
+    website_sessions_count = get_website_sessions_count(month, year, mode)
+    occupancy_percentage = get_occupancy_percentage(month, year, mode)
+
+    total_sold_nights = 0
+    total_free_nights = 0
+
+    for item in unit_nights_summary:
+        total_sold_nights += int(item["sold_nights"])
+        total_free_nights += int(item["free_nights"])
+
+    total_nights = total_sold_nights + total_free_nights
+    if total_nights > 0:
+        sold_percentage = round((total_sold_nights / total_nights) * 100)
+        free_percentage = round((total_free_nights / total_nights) * 100)
+    else:
+        sold_percentage = 0
+        free_percentage = 0
+
+    return {
+        "year": year,
+        "month": month,
+        "mode": mode,
+        "summary": {
+            "booking_count": channel_metrics[0]["total_bookings"] if len(channel_metrics) > 0 else 0,
+            "beddy_pms_count": channel_metrics[1]["total_bookings"] if len(channel_metrics) > 1 else 0,
+            "average_stay_total": round(float(average_stay_total), 1),
+            "children_bookings_count": children_bookings_count,
+            "occupancy_percentage": occupancy_percentage,
+            "website_sessions_count": website_sessions_count,
+        },
+        "channels": channel_metrics,
+        "unit_nights": {
+            "rows": unit_nights_summary,
+            "totals": {
+                "sold_nights": total_sold_nights,
+                "free_nights": total_free_nights,
+            },
+            "occupancy": {
+                "sold_percentage": sold_percentage,
+                "free_percentage": free_percentage,
+            },
+        },
+        "nationalities": nationality_metrics,
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
