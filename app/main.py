@@ -224,8 +224,6 @@ def get_bookings_with_children_count(selected_month: str, selected_year: str, se
         cursor = conn.cursor()
 
         if selected_period_mode == "year":
-            april_total = 0
-
             if selected_year == "2025":
                 cursor.execute(
                     """
@@ -239,36 +237,56 @@ def get_bookings_with_children_count(selected_month: str, selected_year: str, se
                 april_row = cursor.fetchone()
                 april_total = april_row["total"] or 0 if april_row else 0
 
+                cursor.execute(
+                    """
+                    SELECT SUM(CAST(metric_value AS INTEGER)) AS total
+                    FROM dashboard_metrics
+                    WHERE metric_key = 'bookings_with_children_manual'
+                      AND substr(period_start, 1, 4) = '2025'
+                    """
+                )
+                manual_row = cursor.fetchone()
+                manual_total = manual_row["total"] or 0 if manual_row else 0
+
+                return april_total + manual_total
+
             cursor.execute(
                 """
-                SELECT SUM(CAST(metric_value AS INTEGER)) AS total
-                FROM dashboard_metrics
-                WHERE metric_key = 'bookings_with_children_manual'
-                  AND substr(period_start, 1, 4) = ?
+                SELECT COUNT(DISTINCT reservation_id) AS total
+                FROM tableau_reservations
+                WHERE substr(source_day, 1, 4) = ?
+                  AND children > 0
                 """,
                 (selected_year,),
             )
-            manual_row = cursor.fetchone()
-            manual_total = manual_row["total"] or 0 if manual_row else 0
-
-            return april_total + manual_total
+            row = cursor.fetchone()
+            return row["total"] or 0 if row else 0
 
         if selected_month == "2025-04":
             cursor.execute(
                 """
-                SELECT COUNT(*) AS total
+                SELECT COUNT(DISTINCT reservation_id) AS total
                 FROM tableau_reservations
-                WHERE source_day >= '2025-04-01'
-                  AND source_day <= '2025-04-30'
+                WHERE substr(source_day, 1, 7) = ?
                   AND children > 0
-                """
+                """,
+                (selected_month,),
             )
             row = cursor.fetchone()
+            return row["total"] or 0 if row else 0
 
-            if row is None:
-                return 0
-
-            return row["total"] or 0
+        if selected_month.startswith("2026-"):
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT reservation_id) AS total
+                FROM tableau_reservations
+                WHERE substr(source_day, 1, 7) = ?
+                  AND children > 0
+                """,
+                (selected_month,),
+            )
+            row = cursor.fetchone()
+            return row["total"] or 0 if row else 0
 
         cursor.execute(
             """
