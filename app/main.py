@@ -447,6 +447,91 @@ def build_comparison_metric(label: str, value_a: float, value_b: float) -> dict:
         "percentage_change": percentage_change,
     }
 
+
+def build_unit_nights_comparison(unit_nights_a: list[dict], unit_nights_b: list[dict]) -> list[dict]:
+    """Confronta le notti vendute/libere per unità tra due periodi."""
+    units_map_a = {
+        item["unit_label"]: item
+        for item in unit_nights_a
+    }
+
+    units_map_b = {
+        item["unit_label"]: item
+        for item in unit_nights_b
+    }
+
+    ordered_units = [
+        "Camera 1",
+        "Camera 2",
+        "Camera 3",
+        "Camera 4",
+        "Appartamento Vite",
+        "Appartamento Ulivo",
+        "Appartamento Cipresso",
+    ]
+
+    result = []
+
+    for unit_label in ordered_units:
+        item_a = units_map_a.get(unit_label, {})
+        item_b = units_map_b.get(unit_label, {})
+
+        sold_a = int(item_a.get("sold_nights", 0) or 0)
+        sold_b = int(item_b.get("sold_nights", 0) or 0)
+
+        free_a = int(item_a.get("free_nights", 0) or 0)
+        free_b = int(item_b.get("free_nights", 0) or 0)
+
+        result.append(
+            {
+                "unit_label": unit_label,
+                "sold": build_comparison_metric("Vendute", sold_a, sold_b),
+                "free": build_comparison_metric("Libere", free_a, free_b),
+            }
+        )
+
+    return result
+
+def build_nationalities_comparison(nationalities_a: list[dict], nationalities_b: list[dict]) -> list[dict]:
+    """Confronta le presenze per nazionalità tra due periodi."""
+    map_a = {
+        item["nationality"]: int(item["presences"] or 0)
+        for item in nationalities_a
+    }
+
+    map_b = {
+        item["nationality"]: int(item["presences"] or 0)
+        for item in nationalities_b
+    }
+
+    all_nationalities = sorted(
+        set(map_a.keys()) | set(map_b.keys()),
+        key=lambda nationality: (
+            -max(map_a.get(nationality, 0), map_b.get(nationality, 0)),
+            nationality,
+        ),
+    )
+
+    result = []
+
+    for nationality in all_nationalities:
+        value_a = map_a.get(nationality, 0)
+        value_b = map_b.get(nationality, 0)
+
+        if value_a == 0 and value_b == 0:
+            continue
+
+        result.append(
+            build_comparison_metric(
+                nationality,
+                value_a,
+                value_b,
+            )
+        )
+
+    return result
+
+
 @app.get("/api/compare", response_class=JSONResponse)
 def compare_api(
     year_a: str = "2026",
@@ -477,6 +562,14 @@ def compare_api(
     website_a = get_website_sessions_count(month_a, year_a, mode_a)
     website_b = get_website_sessions_count(month_b, year_b, mode_b)
 
+    unit_nights_a = get_unit_nights_summary(month_a, year_a, mode_a)
+    unit_nights_b = get_unit_nights_summary(month_b, year_b, mode_b)
+    unit_nights_comparison = build_unit_nights_comparison(unit_nights_a, unit_nights_b)
+
+    nationalities_a = get_nationality_presence_metrics(month_a, year_a, mode_a)
+    nationalities_b = get_nationality_presence_metrics(month_b, year_b, mode_b)
+    nationalities_comparison = build_nationalities_comparison(nationalities_a, nationalities_b)
+
     return {
         "period_a": {
             "year": year_a,
@@ -496,6 +589,8 @@ def compare_api(
             build_comparison_metric("Occupazione", occupancy_a, occupancy_b),
             build_comparison_metric("Visite website", website_a, website_b),
         ],
+        "unit_nights": unit_nights_comparison,
+        "nationalities": nationalities_comparison,
     }
 
 
