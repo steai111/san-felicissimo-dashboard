@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(title="Data Dashboard")
 
+
 @app.on_event("startup")
 def startup_event() -> None:
     init_db()
@@ -102,9 +103,7 @@ def get_channel_metrics(selected_month: str, selected_year: str, selected_period
 
 
 def get_average_stay_total(selected_month: str, selected_year: str, selected_period_mode: str) -> float:
-    """
-    Restituisce il soggiorno medio totale per mese o anno selezionato.
-    """
+    """Restituisce il soggiorno medio totale per mese o anno selezionato."""
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -374,6 +373,7 @@ def get_unit_nights_summary(selected_month: str, selected_year: str, selected_pe
 
     return result
 
+
 def get_occupancy_percentage(selected_month: str, selected_year: str, selected_period_mode: str) -> int:
     """Restituisce la percentuale di occupazione basata sulle notti vendute."""
     unit_nights_summary = get_unit_nights_summary(selected_month, selected_year, selected_period_mode)
@@ -428,6 +428,76 @@ def get_website_sessions_count(selected_month: str, selected_year: str, selected
         return 0
 
     return row["metric_value"] or 0
+
+
+def build_comparison_metric(label: str, value_a: float, value_b: float) -> dict:
+    """Crea una metrica di confronto tra due valori."""
+    difference = value_a - value_b
+
+    if value_b != 0:
+        percentage_change = round((difference / value_b) * 100, 2)
+    else:
+        percentage_change = None
+
+    return {
+        "label": label,
+        "value_a": value_a,
+        "value_b": value_b,
+        "difference": difference,
+        "percentage_change": percentage_change,
+    }
+
+@app.get("/api/compare", response_class=JSONResponse)
+def compare_api(
+    year_a: str = "2026",
+    month_a: str = "2026-03",
+    mode_a: str = "month",
+    year_b: str = "2025",
+    month_b: str = "2025-04",
+    mode_b: str = "month",
+) -> dict:
+    channel_metrics_a = get_channel_metrics(month_a, year_a, mode_a)
+    channel_metrics_b = get_channel_metrics(month_b, year_b, mode_b)
+
+    booking_a = channel_metrics_a[0]["total_bookings"] if len(channel_metrics_a) > 0 else 0
+    booking_b = channel_metrics_b[0]["total_bookings"] if len(channel_metrics_b) > 0 else 0
+
+    beddy_a = channel_metrics_a[1]["total_bookings"] if len(channel_metrics_a) > 1 else 0
+    beddy_b = channel_metrics_b[1]["total_bookings"] if len(channel_metrics_b) > 1 else 0
+
+    average_stay_a = round(float(get_average_stay_total(month_a, year_a, mode_a)), 1)
+    average_stay_b = round(float(get_average_stay_total(month_b, year_b, mode_b)), 1)
+
+    children_a = get_bookings_with_children_count(month_a, year_a, mode_a)
+    children_b = get_bookings_with_children_count(month_b, year_b, mode_b)
+
+    occupancy_a = get_occupancy_percentage(month_a, year_a, mode_a)
+    occupancy_b = get_occupancy_percentage(month_b, year_b, mode_b)
+
+    website_a = get_website_sessions_count(month_a, year_a, mode_a)
+    website_b = get_website_sessions_count(month_b, year_b, mode_b)
+
+    return {
+        "period_a": {
+            "year": year_a,
+            "month": month_a,
+            "mode": mode_a,
+        },
+        "period_b": {
+            "year": year_b,
+            "month": month_b,
+            "mode": mode_b,
+        },
+        "metrics": [
+            build_comparison_metric("Prenotazioni Booking", booking_a, booking_b),
+            build_comparison_metric("Prenotazioni Beddy", beddy_a, beddy_b),
+            build_comparison_metric("Soggiorno medio", average_stay_a, average_stay_b),
+            build_comparison_metric("Prenotazioni con bambini", children_a, children_b),
+            build_comparison_metric("Occupazione", occupancy_a, occupancy_b),
+            build_comparison_metric("Visite website", website_a, website_b),
+        ],
+    }
+
 
 @app.get("/api/dashboard", response_class=JSONResponse)
 def dashboard_api(
@@ -488,7 +558,6 @@ def dashboard_api(
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> str:
-
     selected_year = request.query_params.get("year", "2025")
     selected_month = request.query_params.get("month", "2025-04")
     selected_period_mode = request.query_params.get("mode", "month")
@@ -514,7 +583,17 @@ def dashboard(request: Request) -> str:
     }
 
     available_months_by_year = {
-        "2025": ["2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12"],
+        "2025": [
+            "2025-04",
+            "2025-05",
+            "2025-06",
+            "2025-07",
+            "2025-08",
+            "2025-09",
+            "2025-10",
+            "2025-11",
+            "2025-12",
+        ],
         "2026": ["2026-03"],
     }
 
@@ -541,7 +620,6 @@ def dashboard(request: Request) -> str:
     website_sessions_count = get_website_sessions_count(selected_month, selected_year, selected_period_mode)
     occupancy_percentage = get_occupancy_percentage(selected_month, selected_year, selected_period_mode)
 
-
     channel_cards_html = ""
     for item in channel_metrics:
         channel_cards_html += f"""
@@ -555,6 +633,9 @@ def dashboard(request: Request) -> str:
         """
 
     nationality_rows_html = ""
+    italians_total = 0
+    foreigners_total = 0
+
     for item in nationality_metrics:
         nationality_rows_html += f"""
         <tr>
@@ -562,6 +643,27 @@ def dashboard(request: Request) -> str:
             <td>{item['presences']}</td>
         </tr>
         """
+
+        if item["nationality"] == "Italia":
+            italians_total += int(item["presences"])
+        else:
+            foreigners_total += int(item["presences"])
+
+    nationalities_total = italians_total + foreigners_total
+
+    if nationalities_total > 0:
+        italians_percentage = round((italians_total / nationalities_total) * 100)
+        foreigners_percentage = round((foreigners_total / nationalities_total) * 100)
+    else:
+        italians_percentage = 0
+        foreigners_percentage = 0
+
+    nationality_rows_html += f"""
+    <tr>
+        <td><strong>Totale</strong></td>
+        <td><strong>Italiani {italians_percentage}% · Stranieri {foreigners_percentage}%</strong></td>
+    </tr>
+    """
 
     unit_rows_html = ""
     total_sold_nights = 0
@@ -696,14 +798,12 @@ def dashboard(request: Request) -> str:
                 .table-card {{
                     padding: 16px;
                 }}
-
                 th, td {{
                     padding: 10px 6px;
                 }}
                 .unit-label-desktop {{
                     display: none;
                 }}
-
                 .unit-label-mobile {{
                     display: inline;
                 }}
@@ -766,7 +866,7 @@ def dashboard(request: Request) -> str:
             </div>
         </form>
 
-                <div class="grid">
+        <div class="grid">
             {channel_cards_html}
 
             <div class="card">
@@ -778,7 +878,7 @@ def dashboard(request: Request) -> str:
             <div class="card">
                 <div class="label">Prenotazioni con bambini</div>
                 <div class="value">{children_bookings_count}</div>
-                <div class="sub">Aprile 2025</div>
+                <div class="sub">{selected_month_label}</div>
             </div>
 
             <div class="card">
@@ -790,7 +890,7 @@ def dashboard(request: Request) -> str:
             <div class="card">
                 <div class="label">Visite al website</div>
                 <div class="value">{website_sessions_count}</div>
-                <div class="sub">Sessioni GA4 · Aprile 2025</div>
+                <div class="sub">Sessioni GA4 · {selected_month_label}</div>
             </div>
         </div>
 
@@ -831,4 +931,5 @@ def dashboard(request: Request) -> str:
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
