@@ -532,6 +532,36 @@ def build_nationalities_comparison(nationalities_a: list[dict], nationalities_b:
     return result
 
 
+def build_nationality_summary(nationality_metrics: list[dict]) -> dict:
+    """Calcola percentuale italiani/stranieri dalle presenze per nazionalità."""
+    italians_total = 0
+    foreigners_total = 0
+
+    for item in nationality_metrics:
+        presences = int(item["presences"] or 0)
+
+        if item["nationality"] == "Italia":
+            italians_total += presences
+        else:
+            foreigners_total += presences
+
+    total = italians_total + foreigners_total
+
+    if total > 0:
+        italians_percentage = round((italians_total / total) * 100)
+        foreigners_percentage = round((foreigners_total / total) * 100)
+    else:
+        italians_percentage = 0
+        foreigners_percentage = 0
+
+    return {
+        "italians_total": italians_total,
+        "foreigners_total": foreigners_total,
+        "italians_percentage": italians_percentage,
+        "foreigners_percentage": foreigners_percentage,
+    }
+
+
 @app.get("/api/compare", response_class=JSONResponse)
 def compare_api(
     year_a: str = "2026",
@@ -603,6 +633,7 @@ def dashboard_api(
     channel_metrics = get_channel_metrics(month, year, mode)
     average_stay_total = get_average_stay_total(month, year, mode)
     nationality_metrics = get_nationality_presence_metrics(month, year, mode)
+    nationality_summary = build_nationality_summary(nationality_metrics)
     children_bookings_count = get_bookings_with_children_count(month, year, mode)
     unit_nights_summary = get_unit_nights_summary(month, year, mode)
     website_sessions_count = get_website_sessions_count(month, year, mode)
@@ -648,6 +679,7 @@ def dashboard_api(
             },
         },
         "nationalities": nationality_metrics,
+        "nationality_summary": nationality_summary,
     }
 
 
