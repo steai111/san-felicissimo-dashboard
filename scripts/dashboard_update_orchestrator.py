@@ -19,8 +19,8 @@ import scripts.extract_unit_nights as extract_unit_nights_module
 BEDDY_STATS_URL = "https://app.beddy.io/stats/revenue"
 
 # Periodo di lavoro: modificabile manualmente
-START_DATE = date(2026, 3, 13)
-END_DATE = date(2026, 3, 28)
+START_DATE = date(2026, 4, 1)
+END_DATE = date(2026, 4, 30)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_CSV_DIR = PROJECT_ROOT / "data" / "raw_csv"
@@ -379,101 +379,114 @@ def import_unit_nights_for_period() -> int:
 
 
 def print_final_report() -> None:
-    print_step("STEP 10 — Report finale database")
+    print_step("STEP 10 — Report finale dashboard")
 
-    with get_connection() as conn:
-        cursor = conn.cursor()
+    period_start = START_DATE.isoformat()
+    period_end = END_DATE.isoformat()
+    selected_year = START_DATE.strftime("%Y")
+    selected_month = START_DATE.strftime("%Y-%m")
+    selected_period_mode = "month"
 
-        period_start = START_DATE.isoformat()
-        period_end = END_DATE.isoformat()
-        month_key = START_DATE.strftime("%Y-%m")
+    from app.main import (
+        get_channel_metrics,
+        get_average_stay_total,
+        get_bookings_with_children_count,
+        get_occupancy_percentage,
+        get_website_sessions_count,
+        get_nationality_presence_metrics,
+        get_unit_nights_summary,
+    )
 
-        cursor.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM beddy_channel_stats
-            WHERE substr(period_start, 1, 7) = ?
-            """,
-            (month_key,),
-        )
-        channel_rows = cursor.fetchone()["total"]
+    channel_metrics = get_channel_metrics(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
 
-        cursor.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM beddy_nationality_stats
-            WHERE substr(period_start, 1, 7) = ?
-            """,
-            (month_key,),
-        )
-        nationality_rows = cursor.fetchone()["total"]
+    booking_count = channel_metrics[0]["total_bookings"] if len(channel_metrics) > 0 else 0
+    booking_incidence = channel_metrics[0]["incidence_rate"] if len(channel_metrics) > 0 else 0
 
-        cursor.execute(
-            """
-            SELECT metric_value
-            FROM ga4_metrics
-            WHERE period_start = ? AND period_end = ?
-              AND metric_name = 'sessions'
-            LIMIT 1
-            """,
-            (period_start, period_end),
-        )
-        ga4_row = cursor.fetchone()
-        ga4_sessions = ga4_row["metric_value"] if ga4_row else 0
+    beddy_count = channel_metrics[1]["total_bookings"] if len(channel_metrics) > 1 else 0
+    beddy_incidence = channel_metrics[1]["incidence_rate"] if len(channel_metrics) > 1 else 0
 
-        cursor.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM tableau_reservations
-            WHERE source_day >= ? AND source_day <= ?
-            """,
-            (period_start, period_end),
-        )
-        children_rows = cursor.fetchone()["total"]
+    average_stay_total = get_average_stay_total(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
 
-        cursor.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM unit_nights_daily
-            WHERE day >= ? AND day <= ?
-            """,
-            (period_start, period_end),
-        )
-        unit_rows = cursor.fetchone()["total"]
+    children_bookings_count = get_bookings_with_children_count(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
+
+    occupancy_percentage = get_occupancy_percentage(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
+
+    website_sessions_count = get_website_sessions_count(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
+
+    nationality_metrics = get_nationality_presence_metrics(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
+
+    unit_nights_summary = get_unit_nights_summary(
+        selected_month,
+        selected_year,
+        selected_period_mode,
+    )
+
+    total_sold_nights = 0
+    total_free_nights = 0
+
+    for item in unit_nights_summary:
+        total_sold_nights += int(item["sold_nights"])
+        total_free_nights += int(item["free_nights"])
+
+    total_nights = total_sold_nights + total_free_nights
 
     print(f"Periodo elaborato: {period_start} -> {period_end}")
-    print(f"Righe canali: {channel_rows}")
-    print(f"Righe nazionalità: {nationality_rows}")
-    print(f"GA4 sessions: {ga4_sessions}")
-    print(f"Prenotazioni tableau_reservations: {children_rows}")
-    print(f"Righe unit_nights_daily: {unit_rows}")
+    print(f"Mese dashboard: {selected_month}")
+    print("")
+
+    print("CONTATORI DASHBOARD")
+    print(f"Prenotazioni Booking: {booking_count} | Incidenza: {booking_incidence:.2f}%")
+    print(f"Prenotazioni Beddy: {beddy_count} | Incidenza: {beddy_incidence:.2f}%")
+    print(f"Soggiorno medio totale: {average_stay_total:.1f}")
+    print(f"Prenotazioni con bambini: {children_bookings_count}")
+    print(f"Occupazione: {occupancy_percentage}%")
+    print(f"Visite website: {website_sessions_count}")
+    print("")
+
+    print("NOTTI PER UNITÀ")
+    print(f"Notti vendute totali: {total_sold_nights}")
+    print(f"Notti libere totali: {total_free_nights}")
+    print(f"Notti totali elaborate: {total_nights}")
+    print("")
+
+    print("TABELLE")
+    print(f"Nazionalità mostrate: {len(nationality_metrics)}")
+    print(f"Unità mostrate: {len(unit_nights_summary)}")
 
 
 def main() -> None:
     print_step("DASHBOARD UPDATE ORCHESTRATOR")
     print(f"Periodo configurato: {START_DATE.isoformat()} -> {END_DATE.isoformat()}")
 
-    print_step("STEP 1 — Apertura Beddy su Statistiche")
-    page = open_beddy_session(BEDDY_STATS_URL)
-    print(f"Pagina aperta: {page.url}")
-
-    wait_for_enter(
-        "Completa il login su Beddy, verifica di essere dentro alla pagina statistiche,"
-        " poi torna qui."
-    )
-
-    print("\nBrowser ancora aperto e sessione attiva.")
-
     wait_for_csv_export()
     run_csv_import()
 
     ga4_file = wait_for_ga4_file()
     import_ga4_current_json(ga4_file)
-
-    wait_for_enter(
-        "Premi INVIO per chiudere il browser Beddy statistiche e passare agli agenti tableau."
-    )
-    close_beddy_session(page)
 
     run_children_extraction()
     confirm_children_jsons()
